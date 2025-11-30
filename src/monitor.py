@@ -9,7 +9,7 @@ def monitor():
 
     metrics = hp._evaluate_on_file("data/test.csv")
     accuracy = metrics["r2"]
-
+    
     print("Current accuracy:", accuracy)
 
     if accuracy < THRESHOLD:
