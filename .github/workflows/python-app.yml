@@ -5,7 +5,10 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-   
+  schedule:
+    - cron: "0 0 * * *"   # runs every day
+  workflow_dispatch:      # manual run also allowed
+
 permissions:
   contents: read
   pages: write
@@ -14,9 +17,9 @@ permissions:
 concurrency:
   group: "pages"
   cancel-in-progress: true
-   
 
 jobs:
+  # -------- CI: tests --------
   test:
     runs-on: ubuntu-latest
 
@@ -38,22 +41,61 @@ jobs:
         run: pytest
 
 
+  # -------- CD: deploy to GitHub Pages --------
   deploy:
-      needs: test             
-      runs-on: ubuntu-latest
-      environment:
-        name: github-pages
-        url: ${{ steps.deployment.outputs.page_url }}
+    needs: test              # only run if tests pass
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - name: Upload artifact for GitHub Pages
-          uses: actions/upload-pages-artifact@v3
-          with:
-            path: .            
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .          # folder with index.html
 
-        - name: Deploy to GitHub Pages
-          id: deployment
-          uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+
+  # -------- Monitoring job (for scheduled runs) --------
+  monitor:
+    # Only run on schedule or manual trigger
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test              # make sure code/tests are OK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run monitoring script
+        run: python -m src.monitor
+
+      - name: Check alert status
+        id: alert
+        run: |
+          python - << 'EOF'
+          import json, os
+          data = json.load(open("alert.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"alert={data['alert']}\n")
+          EOF
+
+      - name: Redeploy new model
+        if: steps.alert.outputs.alert == 'True'
+        run: echo "🚀 Redeploy model here (Render / Railway / etc)"
